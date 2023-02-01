@@ -1,0 +1,440 @@
+<!-- MIT License -->
+<html>
+<head>
+  <style>
+    textarea {
+      height: 160px;
+      width: 100%;
+    }
+
+    a {
+      text-decoration: underline !important;
+      font-weight: bold;
+    }
+    i {
+     font-weight: bold; 
+    }
+  </style>
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <script src="lodash.js"></script>
+  <script>
+    function generateKey(alg, scope) {
+      return new Promise(function(resolve) {
+        var genkey = crypto.subtle.generateKey(alg, true, scope)
+        genkey.then(function (pair) {
+          resolve(pair)
+        })
+      })
+    }
+
+    function arrayBufferToBase64String(arrayBuffer) {
+      var byteArray = new Uint8Array(arrayBuffer)
+      var byteString = ''
+      for (var i=0; i<byteArray.byteLength; i++) {
+        byteString += String.fromCharCode(byteArray[i])
+      }
+      return btoa(byteString)
+    }
+
+    function base64StringToArrayBuffer(b64str) {
+      var byteStr = atob(b64str)
+      var bytes = new Uint8Array(byteStr.length)
+      for (var i = 0; i < byteStr.length; i++) {
+        bytes[i] = byteStr.charCodeAt(i)
+      }
+      return bytes.buffer
+    }
+
+    function textToArrayBuffer(str) {
+      var buf = unescape(encodeURIComponent(str)) // 2 bytes for each char
+      var bufView = new Uint8Array(buf.length)
+      for (var i=0; i < buf.length; i++) {
+        bufView[i] = buf.charCodeAt(i)
+      }
+      return bufView
+    }
+
+    function arrayBufferToText(arrayBuffer) {
+      var byteArray = new Uint8Array(arrayBuffer)
+      var str = ''
+      for (var i=0; i<byteArray.byteLength; i++) {
+        str += String.fromCharCode(byteArray[i])
+      }
+      return str
+    }
+
+
+    function arrayBufferToBase64(arr) {
+      return btoa(String.fromCharCode.apply(null, new Uint8Array(arr)))
+    }
+    function base64toHex(base64string){
+      return buf2hex(base64StringToArrayBuffer(base64string));
+    }
+
+    function buf2hex(buffer) { // buffer is an ArrayBuffer
+      return [...new Uint8Array(buffer)]
+          .map(x => x.toString(16).padStart(2, '0'))
+          .join('');
+    }
+
+    function hex2buf(hex){
+      var typedArray = new Uint8Array(hex.match(/[\da-f]{2}/gi).map(function (h) {
+        return parseInt(h, 16)
+      }))
+      return typedArray;
+    }
+
+
+
+    function convertBinaryToPem(binaryData, label) {
+      var base64Cert = arrayBufferToBase64String(binaryData)
+      var pemCert = "";//"-----BEGIN " + label + "-----\r\n"
+      var nextIndex = 0
+      var lineLength
+      while (nextIndex < base64Cert.length) {
+        if (nextIndex + 64 <= base64Cert.length) {
+          pemCert += base64Cert.substr(nextIndex, 64)
+        } else {
+          pemCert += base64Cert.substr(nextIndex)
+        }
+        nextIndex += 64
+      }
+      //pemCert += "-----END " + label + "-----\r\n"
+      return pemCert
+    }
+
+    function convertPemToBinary(pem) {
+      var lines = pem.split('\n')
+      var encoded = ''
+      // for(var i = 0;i < lines.length;i++){
+      //   if (lines[i].trim().length > 0 &&
+      //       lines[i].indexOf('-BEGIN RSA PRIVATE KEY-') < 0 &&
+      //       lines[i].indexOf('-BEGIN RSA PUBLIC KEY-') < 0 &&
+      //       lines[i].indexOf('-END RSA PRIVATE KEY-') < 0 &&
+      //       lines[i].indexOf('-END RSA PUBLIC KEY-') < 0) {
+      //     encoded += lines[i].trim()
+      //   }
+      // }
+      return base64StringToArrayBuffer(encoded)
+    }
+
+    function importPublicKey(pemKey) {
+      return new Promise(function(resolve) {
+        var importer = crypto.subtle.importKey("spki", convertPemToBinary(pemKey), signAlgorithm, true, ["verify"])
+        importer.then(function(key) {
+          resolve(key)
+        })
+      })
+    }
+
+    function importPrivateKey(pemKey) {
+      return new Promise(function(resolve) {
+        var importer = crypto.subtle.importKey("pkcs8", convertPemToBinary(pemKey), signAlgorithm, true, ["sign"])
+        importer.then(function(key) {
+          resolve(key)
+        })
+      })
+    }
+
+    function exportPublicKey(keys) {
+      return new Promise(function(resolve) {
+        window.crypto.subtle.exportKey('spki', keys.publicKey).
+        then(function(spki) {
+          var pubKey = convertBinaryToPem(spki, "RSA PUBLIC KEY");
+          resolve(pubKey);
+        })
+      })
+    }
+
+    function exportPrivateKey(keys) {
+      return new Promise(function(resolve) {
+        var expK = window.crypto.subtle.exportKey('pkcs8', keys.privateKey)
+        expK.then(function(pkcs8) {
+          var prKey = convertBinaryToPem(pkcs8, "RSA PRIVATE KEY");
+          resolve(prKey);
+        })
+      })
+    }
+
+    function exportSymmetricKey(key) {
+      return new Promise(function(resolve) {
+        window.crypto.subtle.exportKey('jwk', key).then(function(jwk) {
+          //var result = btoa(jwk.k);
+          var result =base64toHex(btoa(jwk.k));
+          resolve(result);
+        })
+      })
+    }
+
+    function exportPemKeys(keys) {
+      return new Promise(function(resolve) {
+        exportPublicKey(keys).then(function(pubKey) {
+          exportPrivateKey(keys).then(function(privKey) {
+            var keys = {publicKey: pubKey, privateKey: privKey};
+            resolve(keys)
+          })
+        })
+      })
+    }
+
+    function signData(key, data) {
+      return window.crypto.subtle.sign(signAlgorithm, key, textToArrayBuffer(data))
+    }
+
+    function testVerifySig(pub, sig, data) {
+      return crypto.subtle.verify(signAlgorithm, pub, sig, data)
+    }
+
+    function encryptData(vector, key, data) {
+      return crypto.subtle.encrypt(
+        {
+          name: "RSA-OAEP",
+          iv: vector
+        },
+        key,
+        textToArrayBuffer(data)
+      )
+    }
+
+    function decryptData(vector, key, data) {
+      return crypto.subtle.decrypt(
+          {
+            name: "RSA-OAEP",
+            iv: vector
+          },
+          key,
+          data
+      )
+    }
+
+    function digestMessage(message) {
+      return new Promise(async(resolve,reject)=>{
+        try{
+          const encoder = new TextEncoder();
+          const data = encoder.encode(message);
+          const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+          const hashArray = Array.from(new Uint8Array(hashBuffer));                 // convert buffer to byte array
+          const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+          // convert bytes to hex string
+          resolve(hashHex);
+        }catch(e){
+          reject(e);
+        } 
+      })
+    }
+
+    var encryptAlgorithm = {
+      name: "RSA-OAEP",
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      extractable: false,
+      hash: {
+        name: "SHA-1"
+      }
+    }
+// https://developer.mozilla.org/en-US/docs/Web/API/AesGcmParams
+    
+    var vector = crypto.getRandomValues(new Uint8Array(16))
+    var appEncryptAlgorithm = {
+      name: "AES-CBC",
+      length: 256,
+      iv:vector
+    }
+    //console.log(bu)
+    var scopeEncrypt = ["decrypt", "encrypt","decrypt"];
+    var scopeDecrypt = ["decrypt","encrypt"];
+    var scopeSign = ["sign", "verify"]
+
+    var studentPrKey='';
+    var studentPuKey='';
+    var studentPuKey=null;
+    var appSecretKey="BBEE3B911E3FB867E1F455C9C95CBBE16A75B78ADFDA61179C38517BC4C61D57";
+    var appPrKeyObj=null;
+    var x = '';
+    var x_hash='';
+    var crypto = window.crypto || window.msCrypto
+    if (crypto.subtle) {
+      main();
+    }
+    function prepareKeys(){
+      return new Promise(async(resolve,reject)=>{
+        try{
+          let keys = await generateKey(encryptAlgorithm, scopeEncrypt);
+          studentPuKey=keys.publicKey;
+          studentPrKey=keys.privateKey;
+          console.log(keys);
+          let pemkeys=await exportPemKeys(keys);
+          console.log(pemkeys);
+          document.getElementById("studentPrKey").innerHTML=pemkeys.privateKey;
+          document.getElementById("studentPuKey").innerHTML=pemkeys.publicKey;
+          return resolve(true)
+        }catch(e){
+          console.error(e);
+          return reject(e)
+        }
+      });
+
+      
+      
+
+            //generateKey(appEncryptAlgorithm, scopeDecrypt)
+            // crypto.subtle.importKey("raw", hex2buf(appSecretKey),appEncryptAlgorithm, true,['encrypt','decrypt']).then(function(key){
+            //   crypto.subtle.encrypt(appEncryptAlgorithm,key,textToArrayBuffer("Test")).then((cipherbytes)=>{
+            //     var ciphertext=arrayBufferToBase64(cipherbytes)
+            //     console.log(ciphertext)
+            //     crypto.subtle.decrypt(appEncryptAlgorithm,key,cipherbytes).then((plainbytes)=>{
+            //         var plaintext= arrayBufferToText(plainbytes)
+            //         console.log(plaintext)
+            //     })
+            //   });
+
+            //   appPrKeyObj=key;
+            //   exportSymmetricKey(key).then(function(key){
+            //     appSecretKey=key
+            //     document.getElementById("appSecretKey").innerHTML=appSecretKey;
+            //   });
+            // });
+    }
+    
+    function giveTask(){
+      var task = generateTask();
+      digestMessage(task["x"]).then(function(_digest){
+        x = task["x"];
+        x_hash=_digest; 
+        composeTask(task,x_hash); 
+      });      
+    }
+
+    function composeTask(task,x_hash){
+      var text = "Well done, you have decrypted the task! Find the value of 'X' in this math problem:\r\n (X*X-"+task["a"]+")*"+task["b"]+"="+task["result"]+".\r\n Here is the catch - decrypt the next part of the message!";
+      var text2 = "Thanks for staying with me. The catch is: there are 2 correct values of 'X'. You need to find the one that gives this hash:\r\n "+x_hash;
+      console.log(text,text2,task);
+      encryptData(vector, studentPuKey, text).then((cipherbytes)=>{
+        document.getElementById('task-part1').innerHTML=arrayBufferToBase64String(cipherbytes);
+        encryptData(vector, studentPuKey, text2).then((cipherbytes)=>{
+          document.getElementById('task-part2').innerHTML=arrayBufferToBase64String(cipherbytes);
+        }).catch((e)=>{console.error(e)});
+      }).catch((e)=>{console.error(e)});
+
+      // crypto.subtle.encrypt(
+      //   encryptAlgorithm,studentPuKey,textToArrayBuffer(text))
+
+      console.log(text);
+    }
+
+    function generateTask(){
+      var x=Math.floor(Math.random() * 15)-16; 
+      var a =Math.floor(Math.random() * 20)+1;
+      var b = Math.floor(Math.random() * 10)+1;
+      var result = (x*x-a)*b;
+      return {"x":x,"a":a,"b":b,"result":result};
+    }
+
+    function main(){
+      prepareKeys().then(()=>{
+        giveTask();
+        console.log(studentPrKey)
+      });
+    }
+
+    function verifyAnswer(){
+      var answer = document.getElementById('answer').value;
+      digestMessage(answer).then((answer_hash)=>{
+        console.log(answer_hash);
+        if(x_hash===answer_hash){
+          alert("Well done!")
+        }else{
+          alert("Nope, the hashes are different!")
+        }
+      })
+    }
+
+    function verifyAnswer2(){
+      var answer = document.getElementById('answer_2').value;
+
+      console.log(studentPuKey)
+      decryptData(vector,studentPuKey,textToArrayBuffer(answer)).then((painbytes)=>{
+        console.log(plainbytes);
+
+        // if(x_hash===answer_hash){
+        //   alert("Well done!")
+        // }else{
+        //   alert("Nope, the hashes are different!")
+        // }
+
+      });
+
+    }
+
+
+  </script>
+</head>
+<body>
+  <div class="container">
+    <div class="container jumbotron" id="studentKeys">
+      <h1>
+        Hello, future Blockchain developer! 
+      </h1>
+      <h3>
+        I have generated a pair of keys for you: a private key and a public key. You can see them below. 
+        Also I have generated you a task and encrypted it with your PUBLIC key.
+        Now, try to decrypt it and solve it.
+      </p>  
+    </div>
+    <div class="container jumbotron" id="studentKeys">
+      <h2>You will need these!</h2>
+      <div class="col-xs-6">
+        <p>Your Private Key</p>
+        <textarea  id="studentPrKey"></textarea>
+      </div>
+      <div class="col-xs-6">
+        <p>Your Public Key</p>
+        <textarea id="studentPuKey"></textarea>
+      </div>
+
+    </div>
+    <!-- <div class="jumbotron" id="appKeys">
+      <textarea class="col-xs-6" id="appSecretKey"></textarea>
+    </div> -->
+  </div>
+  <div class="container">
+
+
+    <div class="alert alert-warning">
+      <h2>Your task</h2>
+      <p>Your task is split into 2 parts and is encrypted with your public key. You can find both encrypted Parts in blue blocks.
+        <br>
+        Algorithm used to encrypt it was <i>"RSA-OAEP" with 2048 key length</i>.
+        <br>
+        Cipher Type was <i>"RSA/ECB/OAEPWithSHA1AndMGF1Padding"</i>(you will need this setting to get valid answer). 
+        <br>
+        In order to find out all of your task, <i>you have to decrypt BOTH Part 1 and Part 2</i> and write them down. 
+        I recommend you use <a href="https://www.devglan.com/online-tools/rsa-encryption-decryption" target="_blank">this online tool</a> for decryption of both parts.</p>
+        <p>Also, in the decrypted Part 2 you will find Hash of correct answer. Hash algorithm used is SHA-256. For this part, I recommend using <a href="https://emn178.github.io/online-tools/sha256.html" target="_blank">this online tool for hashing</a>.</p>
+    </div>
+    <div class="alert alert-info">
+      <p>Part 1</p>
+      <textarea  id="task-part1"></textarea>
+    </div>
+    <div class="alert alert-info">
+      <p>Part 2</p>
+      <textarea  id="task-part2"></textarea>
+      <p>Hint: Remember that result of "X * X" is always positive number, but "X" can be either negative, zero or positive. 
+      <br>For example, if x=5 then 5*5 = 25(all is good), but also if x=(-5) then (-5)*(-5) = 25 too!</p>
+    </div>
+
+    <div class="alert alert-info">
+      <p>What is correct answer?</p>
+      <input id="answer" type="text" onchange="verifyAnswer()">
+    </div>
+
+    <!-- <div >
+      <p>Now encrypt this answer with your private key and paste here!</p>
+      <textarea id="answer_2" onchange="verifyAnswer2()"></textarea>
+    </div>
+ -->
+  </div>
+</body>
+</html>
